@@ -1,0 +1,19 @@
+{
+  "title": "StimGen 2.1 study adaptation",
+  "upload_type": "software",
+  "description": "StimGen adapted by Ilya Kapral for retinal recordings. The release includes the StimGen 2.1 launcher used on the recording rig, the software environment, calibration files, stimulus presets, and change notes. Ben Murphy-Baum wrote the original StimGen.",
+  "creators": [
+    {
+      "name": "Kapral, Ilya"
+    }
+  ],
+  "license": "GPL-3.0-only",
+  "related_identifiers": [
+    {
+      "scheme": "doi",
+      "identifier": "10.5281/zenodo.5903691",
+      "relation": "isDerivedFrom",
+      "resource_type": "software"
+    }
+  ]
+}
