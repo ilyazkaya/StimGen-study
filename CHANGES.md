@@ -1,6 +1,6 @@
 # Changes in Ilya’s StimGen 2.1
 
-Ben Murphy-Baum wrote the original [StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Kapral made the changes below for his recording rig and experiments. This comparison covers the [StimGen 2.1 rig snapshot dated 6 December 2024](StimGen-ilya2.1.py) and the copy of Ben’s `StimGen.py` used as the comparison baseline. The adaptation is released under [GPLv3](LICENSE).
+Ben Murphy-Baum wrote the original [StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Capralov made the changes below for his recording rig and experiments. This comparison covers the [StimGen 2.1 rig snapshot dated 6 December 2024](StimGen-ilya2.1.py) and the copy of Ben’s `StimGen.py` used as the comparison baseline. The adaptation is released under [GPLv3](LICENSE).
 
 ## Saving and logging
 
