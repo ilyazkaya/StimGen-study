@@ -1,7 +1,7 @@
 {
   "title": "StimGen 2.1 study adaptation",
   "upload_type": "software",
-  "description": "StimGen adapted by Ilya Capralov for retinal recordings. The release includes the StimGen 2.1 study launcher from commit f1cf0116d5e16c7d91ecea67f4f0be14f2ee3336, its random-number helper, the software environment, Paper 1 stimulus and calibration presets, and change notes. Ben Murphy-Baum wrote the original StimGen.",
+  "description": "StimGen adapted by Ilya Capralov for retinal recordings. The release includes the StimGen 2.1 study launcher from commit f1cf0116d5e16c7d91ecea67f4f0be14f2ee3336, its random-number helper, the software environment, the NaV Bifid Stim preset bank with stimulus and calibration files, and change notes. Ben Murphy-Baum wrote the original StimGen.",
   "creators": [
     {
       "name": "Capralov, Ilya"

@@ -2,7 +2,7 @@
 
 StimGen designs and presents visual stimuli for experiments using Qt and PsychoPy. Ben Murphy-Baum wrote the [original StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Capralov modified it for retinal recordings. The [change notes](CHANGES.md) describe the modifications and their experimental rationale.
 
-Use the [v2.1.1 study archive](https://github.com/ilyazkaya/StimGen-study/tree/v2.1.1) for the paper. It preserves `StimGen-ilya2.1.py` and `rng.py` from the study repository’s commit `f1cf0116d5e16c7d91ecea67f4f0be14f2ee3336` (3 July 2025). The launcher’s SHA-256 is `61ca771cb5b1bbea1675ea5a3d521779c7355d78370178731379f640847171a7`. The earlier `v2.1` tag contains the staging build.
+Use the [v2.1.2 study archive](https://github.com/ilyazkaya/StimGen-study/tree/v2.1.2) for the paper. It preserves `StimGen-ilya2.1.py` and `rng.py` from the study repository’s commit `f1cf0116d5e16c7d91ecea67f4f0be14f2ee3336` (3 July 2025). The launcher’s SHA-256 is `61ca771cb5b1bbea1675ea5a3d521779c7355d78370178731379f640847171a7`. The earlier `v2.1` tag contains the staging build.
 
 ## Run
 
@@ -22,7 +22,7 @@ Select the display and adjust the pixels per micrometre, background, offsets, an
 
 ## Cite
 
-Cite the v2.1.1 archive by its version-specific Zenodo DOI when available. Cite [Murphy-Baum, *StimGen*, v1.0.0 (2022)](https://doi.org/10.5281/zenodo.5903691) for the original software.
+Cite the v2.1.2 archive by its version-specific Zenodo DOI when available. Cite [Murphy-Baum, *StimGen*, v1.0.0 (2022)](https://doi.org/10.5281/zenodo.5903691) for the original software.
 
 ## License
 

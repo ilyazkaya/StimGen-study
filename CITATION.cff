@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "Cite the archived version of this adaptation and acknowledge Ben Murphy-Baum’s original StimGen."
 title: "StimGen 2.1 study adaptation"
 type: software
-version: "2.1.1"
+version: "2.1.2"
 license: GPL-3.0-only
 authors:
   - family-names: Capralov
