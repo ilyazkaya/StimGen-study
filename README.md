@@ -1,12 +1,12 @@
 # StimGen 2.1 study adaptation
 
-StimGen designs and presents visual stimuli for experiments using Qt and PsychoPy. Ben Murphy-Baum wrote the [original StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Kapral modified it for retinal recordings. The [change notes](CHANGES.md) describe the modifications and their experimental rationale.
+StimGen designs and presents visual stimuli for experiments using Qt and PsychoPy. Ben Murphy-Baum wrote the [original StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Capralov modified it for retinal recordings. The [change notes](CHANGES.md) describe the modifications and their experimental rationale.
 
-**Rig snapshot, 6 December 2024.** `StimGen-ilya2.1.py` preserves the launcher from the recording rig byte for byte. Its SHA-256 is `b7bcb1d4770c100016884d68f1d58b10459254bc5402a9acecf34a9a77f85374`.
+Use the [v2.1.1 study archive](https://github.com/ilyazkaya/StimGen-study/tree/v2.1.1) for the paper. It preserves `StimGen-ilya2.1.py` and `rng.py` from the study repository’s commit `f1cf0116d5e16c7d91ecea67f4f0be14f2ee3336` (3 July 2025). The launcher’s SHA-256 is `61ca771cb5b1bbea1675ea5a3d521779c7355d78370178731379f640847171a7`. The earlier `v2.1` tag contains the staging build.
 
 ## Run
 
-From the repository root, create the supplied Conda environment and start the launcher.
+From the repository root, create the study's Conda environment and start the launcher.
 
 ```sh
 conda env create -f environment.yml
@@ -14,16 +14,18 @@ conda activate stim
 python StimGen-ilya2.1.py
 ```
 
-Select the display and calibrate the pixels per micrometre, background, offsets, and gamma for your rig. The launcher assumes a 60 Hz display and uses parallel-port address `0x4FF8`. On Windows, obtain the parallel-port driver separately using the [PsychoPy setup guide](https://psychopy.org/hardware/parallelPortInstr.html). Set **Save to Path** to an existing writable log directory and select a preset before running. Run and export save current settings over the selected preset. Use a working copy of a preset to preserve the archived settings.
+Select the display and adjust the pixels per micrometre, background, offsets, and gamma for your setup. StimGen measures the display refresh rate at initialization. The parallel-port address is `0x4FF8`. For Windows, use the [PsychoPy parallel-port setup guide](https://psychopy.org/hardware/parallelPortInstr.html). Set **Save to Path** to an existing writable log directory. Run and export save over the selected preset. Use a working copy to preserve the archived settings.
+
+The archived launcher retains an error in `CalculateGrating()` when the grating texture-update routine calls `time.time()` on the imported `time` function.
 
 ## Stimulus presets
 
-Under **User → Paper 1**, 17 presets cover the stimulus labels used in the paper. Eleven are recorded stimulus files and six are matching named bank presets whose historical settings may differ. **User → Calibration** contains the pixels-per-micrometre calibration preset. The included profile and gamma tables are specific to the original setup.
+**User → Paper 1** contains 17 study presets and `PPMCallibration.stim`. Eleven study presets come from matched recording snapshots and five from the study bank. The supplemental `NullGratFlash3.stim` is a separately preserved named preset. Historical settings for named presets may differ from those used for individual recordings.
 
 ## Cite
 
-Cite the released adaptation by its version-specific Zenodo DOI and cite [Murphy-Baum, *StimGen*, v1.0.0 (2022)](https://doi.org/10.5281/zenodo.5903691) for the original software.
+Cite the v2.1.1 archive by its version-specific Zenodo DOI when available. Cite [Murphy-Baum, *StimGen*, v1.0.0 (2022)](https://doi.org/10.5281/zenodo.5903691) for the original software.
 
 ## License
 
-Original StimGen © Ben Murphy-Baum. Study modifications © Ilya Kapral. The modified work is distributed under the [GNU General Public License, version 3](LICENSE).
+Original StimGen © Ben Murphy-Baum. Study modifications © Ilya Capralov. The modified work is distributed under the [GNU General Public License, version 3](LICENSE).

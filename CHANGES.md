@@ -1,31 +1,33 @@
-# Changes in Ilya’s StimGen 2.1
+# Changes in the StimGen 2.1 study launcher
 
-Ben Murphy-Baum wrote the original [StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Capralov made the changes below for his recording rig and experiments. This comparison covers the [StimGen 2.1 rig snapshot dated 6 December 2024](StimGen-ilya2.1.py) and the copy of Ben’s `StimGen.py` used as the comparison baseline. The adaptation is released under [GPLv3](LICENSE).
+Ben Murphy-Baum wrote the original [StimGen](https://doi.org/10.5281/zenodo.5903691). Ilya Capralov made the changes below for his rig and experiments. This comparison uses the two launchers at study commit `f1cf0116d5e16c7d91ecea67f4f0be14f2ee3336` (3 July 2025). The adaptation is released under [GPLv3](LICENSE).
 
 ## Saving and logging
 
-1. **Save stimulus before a run.** Running or exporting a stimulus saves the current settings over the selected stimulus-bank file without opening a naming dialog. This keeps edits when switching to another stimulus for a quick check.
-2. **Archive the stimulus file.** After a non-aborted run, StimGen copies the selected `.stim` file into a dated folder under the log directory. The filename includes the timestamp, stimulus ID, and stimulus name. The copy preserves the stimulus definition for later replay. The text log remains available for reading and parsing. Replaying a run also requires the corresponding global settings and rig calibration.
-3. **Record global settings in the log.** The text log now records X/Y offsets, background, bit depth, and the selected gamma table after each object’s parameters. These settings are needed to reproduce the stimulus on the rig.
-4. **Default log filename.** StimGen fills in the date at startup in uppercase `MMM_DD_YY` format, saving a step at the start of the day.
+- **Save before a run.** Running or exporting saves the current settings over the selected stimulus-bank file without a naming dialog. This keeps edits when switching to another stimulus for a quick check.
+- **Archive each completed stimulus.** After a non-aborted run, StimGen copies the saved `.stim` to a dated log folder under a filename containing its timestamp, stimulus ID, and name. The file preserves the stimulus definition for replay. The text log remains available for reading and parsing.
+- **Log global settings.** The text log includes X/Y offsets, background, bit depth, and the selected gamma table alongside the object data. These settings are needed to reproduce the stimulus on the rig.
+- **Default log filename.** The date is filled in at startup in uppercase `MMM_DD_YY` format, saving a step at the start of the day.
 
-## Rig timing, coordinates, and intensity
+## Timing and run display
 
-5. **Fixed 60 Hz timing.** StimGen uses a frame interval of 1/60 s when converting durations and motion to frames. The original measured the display refresh rate at session initialization.
-6. **Rotate stimulus coordinates.** To match the rig optics, StimGen maps global offsets and object Cartesian positions from `(x, y)` to `(y, −x)`, truncating object coordinates to integers. It subtracts 90° from motion direction and polar position angle and reverses the sign of object orientation.
-7. **Fixed parallel-port address.** The parallel-port trigger and settings field use the rig’s address, `0x4FF8`. The original used a configurable address with `0xE010` as the default.
-8. **Default 12-bit encoding.** The startup setting changes from 8 to 12 bits to make finer intensity steps available for low-contrast stimuli on the rig.
-9. **Gamma lookup for the initial grating texture.** The initial texture is built with the gamma-table lookup disabled. The separate `CalculateGrating()` routine still applies the lookup.
+- **Measure display refresh.** Session initialization measures the refresh rate and retries with a cleared measurement cache if the first call returns no rate.
+- **Time sweeps by elapsed seconds.** The sweep loop uses elapsed time to control trial length and object onset and duration. It derives the stimulus frame index from elapsed time and the measured frame interval. Grating drift advances phase by drift frequency times the elapsed time since the previous loop.
+- **Record flips and display sweep progress.** The frame timestamp array can grow when a sweep produces more flips than expected. The interface shows elapsed seconds during the sweep and keeps the last sweep count visible at normal completion.
 
-## Stimulus rendering
+## Rig coordinates and intensity
 
-10. **Larger 2D checkerboard.** The noise stimulus is drawn at 4096 × 4096 display pixels, up from 512 × 512. Noise-element size still comes from the stimulus settings. The larger field supports longer drift before the moving checkerboard reaches its edge.
-11. **Checkerboard drift.** In Drift mode, the 2D and 1D checkerboards update their position each frame using either the selected speed and direction or a defined trajectory.
-12. **Checkerboard aperture position.** The 2D checkerboard’s object aperture uses both the global offset and the local position. This lets two objects be presented with separate apertures in different locations.
-13. **Grating aperture setup.** A circular aperture is re-enabled for gratings with a positive object-aperture size, using the global and local offsets. The existing aperture block then creates a second circular aperture at the same center.
-14. **Shared aperture position defaults.** Local X and Y start at zero before StimGen resolves the object’s Cartesian or polar coordinates for the shared aperture.
-15. **Buffered annulus rendering.** StimGen draws the annulus using an image buffered from two circles, with the inner circle set to the background intensity. The buffered image is used for drawing in place of the original vector shape.
+- **Rotate coordinates.** The launcher rotates global offsets and Cartesian object positions to match the rig optics. It subtracts 90° in polar-position and motion calculations, reverses the sign of orientation, and applies a second Cartesian transform before the shared-aperture setup.
+- **Set the parallel-port address.** The trigger and settings field use `0x4FF8`, the address used by the rig. The original used a configurable address with `0xE010` as the default.
+- **Default to 12-bit encoding.** The startup setting changes from 8 to 12 bits to make finer intensity steps available for low-contrast stimuli on the rig.
+- **Move apertures with object position.** Grating and 2D checkerboard apertures use global and local offsets. This allows separate apertures at different locations. The draw loop recalculates local coordinates for each object. The shared aperture starts with zero local offsets before resolving Cartesian or polar position.
 
-## Run display
+## Stimulus rendering and sequences
 
-16. **Sweep counter display.** The most recent sweep count stays visible while StimGen waits for the next sweep and at normal completion.
+- **Seed randomization consistently.** The launcher adds `rng.py` and a master seed of 1. It resets the Python and NumPy random generators at run and sweep boundaries. Random-walk angles and checkerboard shifts use NumPy’s generator. Motion clouds and random dots use the master seed.
+- **Extend checkerboard drift.** The 2D checkerboard grows from 512 × 512 to 4096 × 4096 display pixels to support longer drift. Noise-element size still comes from the preset. Drift updates the position of both 1D and 2D checkerboards using the direction and speed or the selected trajectory.
+- **Build grating textures from the background.** The initial texture uses alternating background and brighter bars, with no separate texture gamma lookup at that step. The separate modulation routine builds square or sine textures from the object intensities and applies the gamma table.
+- **Add a contrast ramp.** Ramp mode adds initial contrast and a sequence assignment for that value. The update interpolates between the initial and final intensities. Non-grating sinusoidal modulation maps the sine wave between the two intensity limits.
+- **Buffer annuli.** The annulus is drawn from a buffered image of two circles, with the inner circle set to background intensity.
+- **Edit sequences together.** The sequence editor trims whitespace and skips empty entries. **Cycle Sequences** moves each final entry to the front. **Shuffle Sequences** checks sequence lengths, but the shuffle call is commented out in this snapshot, so it leaves the order unchanged.
+- **Update the interface.** The launcher applies a dark stylesheet and labels the abort button **Stop**.

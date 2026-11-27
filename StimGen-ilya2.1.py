@@ -10,7 +10,7 @@
 
 #Qt widgets
 from PyQt5.QtWidgets import QApplication,QWidget,QMainWindow,QMenuBar,QMenu,QAction,QPushButton,QLineEdit,QGroupBox,QComboBox,QFrame,QAbstractItemView,QDesktopWidget
-from PyQt5.QtWidgets import QLabel,QListWidget,QListWidgetItem,QSpacerItem,QVBoxLayout,QGridLayout,QCheckBox,QInputDialog,QListView,QFontDialog,QErrorMessage
+from PyQt5.QtWidgets import QLabel,QListWidget,QListWidgetItem,QSpacerItem,QVBoxLayout,QGridLayout,QCheckBox,QInputDialog,QListView,QFontDialog,QErrorMessage, QSizePolicy
 from PyQt5 import QtCore,QtGui
 
 #PsychoPy - visual stimulus library
@@ -42,9 +42,6 @@ import platform
 #math operations
 import numpy as np
 
-#random number generators
-from random import random, randint, seed
-
 #for copying dictionaries
 import copy
 
@@ -62,6 +59,22 @@ if NI_FLAG:
 #save the frame time stamps to this file as well.
 global STIMGEN_FLAG
 STIMGEN_FLAG = 1
+
+# ------------------------------------------------------------------
+# --- GLOBAL, PROJECT-WIDE SEED  -----------------------------------
+# Every random call in Python and NumPy will now be reproducible.
+# ------------------------------------------------------------------
+import random
+import numpy as np
+from rng import reset
+
+MASTER_SEED = 1
+random.seed(MASTER_SEED)          # std-lib RNG
+np.random.seed(MASTER_SEED)       # legacy NumPy RNG
+
+# One NumPy “Generator” instance you can reuse anywhere:
+rng_global = np.random.default_rng(MASTER_SEED)
+# ------------------------------------------------------------------
 
 #Build the GUI
 class App(QMainWindow):
@@ -182,7 +195,7 @@ class App(QMainWindow):
         self.runStimulus.setStyleSheet('QPushButton {background-color: rgba(150, 245, 150, 150)}')
         self.runStimulus.clicked.connect(lambda: self.buttonProc("runStimulus"))
 
-        self.abortStimulus = QPushButton('Abort',self)
+        self.abortStimulus = QPushButton('Stop',self)
         self.abortStimulus.move(90 * scale_w,720 * scale_h)
         self.abortStimulus.resize(60 * scale_w,30 * scale_h)
         self.abortStimulus.setFont(boldLarge)
@@ -555,7 +568,7 @@ class App(QMainWindow):
             item = self.seqListBox.currentItem()
             name = item.text()
             entry = self.seqEntry.text()
-            seqDict[name] = entry.split(",") #list
+            seqDict[name] = [s.strip() for s in entry.split(",") if s.strip()] #list
 
         elif controlName.find('mask') != -1:
             #it's a mask variable, add to mask dictionary instead of stimulus dictionary
@@ -624,6 +637,44 @@ class App(QMainWindow):
                         stim[index][controlName] = 0
 
     #Handles all button clicks
+    def shuffleAllSequences(self):
+        """
+        Shuffle all sequences in seqDict in a consistent random way.
+        Example:
+          Seq1: [1,2,3,4] -> [2,3,1,4]
+          Seq2: [a,b,c,d] -> [b,c,a,d]
+        """
+
+        if not seqDict:
+            return  # no sequences to shuffle
+
+        # -- Check all sequences have the same length (if you want strict matching)
+        lengths = [len(values) for values in seqDict.values()]
+        if not all(l == lengths[0] for l in lengths):
+            # If you want to allow different lengths, handle that logic here
+            # For example, skip sequences of mismatched length or return
+            print("Not all sequences share the same length. Shuffling canceled.")
+            return
+
+        n = lengths[0]
+        # -- Create one random permutation of indices 0..n-1
+        indices = list(range(n))
+        # random.shuffle(indices)
+
+        # -- Apply that random permutation to *every* sequence in seqDict
+        for seqName, seqValues in seqDict.items():
+            reordered = [seqValues[i] for i in indices]
+            seqDict[seqName] = reordered
+
+        # -- Finally, update the text display of the currently selected sequence
+        selectedItem = self.seqListBox.currentItem()
+        if selectedItem:
+            currentSeqName = selectedItem.text()
+            newValues = seqDict[currentSeqName]
+            self.seqEntry.setText(",".join(str(v) for v in newValues))
+
+        print("All sequences have been shuffled!")
+
     def buttonProc(self,controlName):
         global isOpen, abortStatus, saveToPath, stimPath, stimID, stim
 
@@ -1440,6 +1491,28 @@ class App(QMainWindow):
             entry = ','.join(entry)
             self.seqEntry.setText(entry)
 
+    def cycleAllSequences(self):
+        """
+        Cycles each sequence by one step:
+          E.g., [1,2,3,4] -> [4,1,2,3]
+        """
+        if not seqDict:
+            return
+
+        # Cycle every sequence
+        for seqName, seqValues in seqDict.items():
+            if len(seqValues) > 1:
+                # Move the last item to the front
+                seqDict[seqName] = [seqValues[-1]] + seqValues[:-1]
+
+        # Update display for the currently selected sequence, if any
+        selectedItem = self.seqListBox.currentItem()
+        if selectedItem:
+            currentSeqName = selectedItem.text()
+            newValues = seqDict[currentSeqName]
+            self.seqEntry.setText(",".join(str(v) for v in newValues))
+
+        print("All sequences have been cycled!")
 
     def CheckSequenceType(self,entry):
         #check if the sequence is an expression or a list of values
@@ -1772,6 +1845,22 @@ class App(QMainWindow):
 
     #Changes controls based on object Type
     def flipControls(self,controlName,selection):
+
+        if controlName == 'modulationType':
+            # Hide the contrast_1 controls by default:
+            self.contrast1Label.hide()
+            self.contrast1.hide()
+            self.contrast1Seq.hide()
+            self.modulationFreqLabel.hide()
+            self.modulationFreq.hide()
+
+            if selection == 'Ramp':
+                # When ramp is selected, show the contrast_1 controls.
+                self.contrast1Label.show()
+                self.contrast1.show()
+                self.contrast1Seq.show()
+                self.modulationFreqLabel.hide()
+                self.modulationFreq.hide()
 
         if selection == 'Circle' and controlName == 'objectType':
 
@@ -2190,8 +2279,10 @@ class App(QMainWindow):
         isOpen = 1 #window is open
 
         #Frame rate
-        # rate = self.measureFrameRate()
-        rate = 60
+        rate = self.measureFrameRate()
+        if rate is None:
+            rate = win.getActualFrameRate(nIdentical=10, clearCache=True)
+        # print(rate)
         ifi = 1./rate
 
         ppm = float(self.ppm.text())
@@ -2228,15 +2319,15 @@ class App(QMainWindow):
 
     #Fills out the stimulus parameters into a structure
     def runStim(self,exportStimulus):
+        rng = reset()
+        random.seed(MASTER_SEED)
+        np.random.seed(MASTER_SEED)
 
         # Save stimulus to file before running. This helps to capture the most up-to-date parameter values in the stim
         # log folder with saveStimFileLog()
         self.saveStimulus(rename=False)
 
         global runTime,stimID, NI_FLAG,cloudArray,trajSegments
-
-        #sets random number generator seed
-        seed(1)
 
         #Blocks stimulus runs if the centering calibration is active
         # if centeringActive == 1:
@@ -2466,20 +2557,19 @@ class App(QMainWindow):
             frameTimeStamps = np.zeros((1,numSweeps*repeats))
 
             #STIMULUS LOOP #Loop through repeats
+            frameClock = core.Clock()
+            prev_t = frameClock.getTime()
             for repeat in range(repeats): #use repeat setting for first object
 
                 #loop through sweeps from sequence assignments
                 for sweep in range(numSweeps):
+                    global rng_global
+                    rng_global = np.random.default_rng(MASTER_SEED)
 
-                    #ensures consistent seeds for each sweep
-                    seed(1)
-
-                    #Instantiate a new random number generator and a second one for parallel use
-                    #I'm using the second number generator in the noise stimulus, so that the same sequence of noise occurs
-                    #whether I'm implementing random positional shifts or not. The positional shifts also use randomization,
-                    #so I need to use a different number generator instance to avoid disrupting the pixel noise sequence.
-
-                    rng = np.random.default_rng(1)
+                    random.seed(MASTER_SEED)
+                    np.random.seed(MASTER_SEED)
+                    rng = np.random.default_rng(MASTER_SEED)
+                    rng_global = rng
 
                     #check for abort click
                     if abortStatus:
@@ -2540,12 +2630,6 @@ class App(QMainWindow):
                             'angles': np.zeros(totalDuration+1)
                         }
 
-                        # Rotate the angle for motion vector. IC
-                        stim[i]['angle'] = stim[i]['angle'] - 90
-
-                        # Rotate the angle for offset vector. IC
-                        stim[i]['polarAngle'] = stim[i]['polarAngle'] - 90
-
                         # Counteract the rotation of objects to counterclockwise.
                         stim[i]['orientation'] = - stim[i]['orientation']
 
@@ -2561,11 +2645,11 @@ class App(QMainWindow):
                             xPos = stim[i]['xPos']
                             yPos = stim[i]['yPos']
                         elif stim[i]['coordinateType'] == 'Polar':
-                            xPos = stim[i]['polarRadius'] * np.cos(stim[i]['polarAngle'] * np.pi/180.)
-                            yPos = stim[i]['polarRadius'] * np.sin(stim[i]['polarAngle'] * np.pi/180.)
+                            xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi/180.)
+                            yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi/180.)
 
-                        runTime[i]['startX'] = ppm * (xOffset + xPos) + ppm * stim[i]['startRad'] * np.cos(stim[i]['angle'] * np.pi/180.)
-                        runTime[i]['startY'] = ppm * (yOffset + yPos) + ppm * stim[i]['startRad'] * np.sin(stim[i]['angle'] * np.pi/180.)
+                        runTime[i]['startX'] = ppm * (xOffset + xPos) + ppm * stim[i]['startRad'] * np.cos((stim[i]['angle'] - 90) * np.pi/180.)
+                        runTime[i]['startY'] = ppm * (yOffset + yPos) + ppm * stim[i]['startRad'] * np.sin((stim[i]['angle'] - 90) * np.pi/180.)
 
                         #Motion parameters
                         if stim[i]['motionType'] == 'Drift':
@@ -2622,8 +2706,8 @@ class App(QMainWindow):
                                 xPos = stim[i]['xPos']
                                 yPos = stim[i]['yPos']
                             elif stim[i]['coordinateType'] == 'Polar':
-                                xPos = stim[i]['polarRadius'] * np.cos(stim[i]['polarAngle'] * np.pi/180.)
-                                yPos = stim[i]['polarRadius'] * np.sin(stim[i]['polarAngle'] * np.pi/180.)
+                                xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi/180.)
+                                yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi/180.)
 
                             #initialize a cloud aperture at the origin
                             cloudAperture = visual.Aperture(
@@ -2655,21 +2739,25 @@ class App(QMainWindow):
 
                         #calculate trajectory frames
                         if stim[i]['trajectory'] != 'None':
-                            #sets random number generator seed. Ensures that random walk trajectories are identical to
-                            #those defined by standard motion random walk earlier in the code.
-                            seed(1)
 
                             self.calculateTrajectory(stim[i]['trajectory'],i,sweep,ifi,ppm,xOffset,yOffset)
                             runTime[i]['frames'] = len(trajectoryStim[i]['yPos'])
 
-                        #Create an array that holds random walk angles for each object.
-                        #This is for potential random walk stimuli, and just ensures consistent seeding across objects
-                        seed(1)
-                        randomAngles[i]['angles'] = [randint(0,360) for _ in range(totalDuration + 1)]
+                        randomAngles[i]['angles'] = [rng.integers(0, 361) for _ in range(totalDuration + 1)]
 
                         #If the object in question is a grating, fix the random angles to be +/- along the axis of motion
                         if stim[i]['objectType'] == 'Grating':
                             randomAngles[i]['angles'] = [1 if v < 180 else -1 for v in randomAngles[i]['angles']]
+
+                        # Counteract the rotation of objects to counterclockwise.
+                        stim[i]['orientation'] = - stim[i]['orientation']
+
+                        # rotating X and y offsets by -90 deg. IC
+                        rotation_matrix = np.array([[0, -1], [1, 0]])  # 90 deg clockwise
+                        ipos_matrix = np.array([stim[i]['xPos'], stim[i]['yPos']])
+                        fpos_matrix = rotation_matrix.dot(ipos_matrix)
+                        stim[i]['xPos'] = int(fpos_matrix[0])
+                        stim[i]['yPos'] = int(fpos_matrix[1])
 
                     #define the masks/aperture
                     if stim[0]['apertureStatus'] == 'On':
@@ -2679,8 +2767,8 @@ class App(QMainWindow):
                             xPos = stim[i]['xPos']
                             yPos = stim[i]['yPos']
                         elif stim[i]['coordinateType'] == 'Polar':
-                            xPos = stim[i]['polarRadius'] * np.cos(stim[i]['polarAngle'] * np.pi/180.)
-                            yPos = stim[i]['polarRadius'] * np.sin(stim[i]['polarAngle'] * np.pi/180.)
+                            xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi/180.)
+                            yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi/180.)
 
                         aperture = visual.Aperture(
                         win = win,
@@ -2794,23 +2882,37 @@ class App(QMainWindow):
                         writeTimestamps('Triggers',triggerTimeStamps)
 
                     #overall timer that is started before delay
-                    totalTimer = 0
                     totalTimer = core.Clock()
+                    sweepClock = core.Clock()
+                    prev_t = sweepClock.getTime()
 
-                    objectON = 0
-                    onTime = 0
-
-                    #loop through total stimulus duration
-                    for frame in range(totalDuration):
-                        #display the timer
-                        self.stimCountDown.setText("%.2f" % (totalTimer.getTime()))
-                        self.sweepMonitor.setText(str(sweep + 1) + '/' + str(numSweeps))
-
-                        #flip sync spot to dark as default
-                        self.drawSyncSpot(syncSpot,-1)
+                    frame = 0
+                    targetSec = trialTime
+                    sweepClock = core.Clock()
+                    prev_t = sweepClock.getTime()
+                    frame = 0  # counts flips in this sweep
+                    objectON = 0  # marks first frame of any object
+                    self.sweepMonitor.setText(f"{sweep + 1}/{numSweeps}")  # show “3/10”, etc.
+                    last_ui_update = -0.1
+                    run_time = 0
+                    while sweepClock.getTime() < targetSec:
+                        now = sweepClock.getTime()
+                        if now - last_ui_update >= 0.1:
+                            # count-up (elapsed).  For count-down use: remaining = trialTime - now
+                            self.stimCountDown.setText(f"{now:.2f}")
+                            last_ui_update = now
+                        dt = now - prev_t
+                        prev_t = now
 
                         #Loop through each object
                         for i in range(numObjects):
+                            # Recalculate xPos and yPos for the current object
+                            if stim[i]['coordinateType'] == 'Cartesian':
+                                xPos = stim[i]['xPos']
+                                yPos = stim[i]['yPos']
+                            elif stim[i]['coordinateType'] == 'Polar':
+                                xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi / 180.)
+                                yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi / 180.)
 
                             #extract stimulus intensity so you only do it once per object
                             firstIntensity = runTime[i]['firstIntensity']
@@ -2820,11 +2922,11 @@ class App(QMainWindow):
                             #which already has the delays and duration built into it.
                             if isFrameStimulus == 0:
                                 #delay
-                                if frame < runTime[i]['delayFrames']:
+                                if now < stim[i]['delay']:
                                     continue
 
                                 #duration
-                                if frame >= runTime[i]['delayFrames'] + runTime[i]['frames']:
+                                if now > stim[i]['delay'] + stim[i]['duration']:
                                     continue
 
 
@@ -2871,7 +2973,7 @@ class App(QMainWindow):
                                         runTime[i]['randomWalkAngle'] = randomAngles[i]['angles'][randomAngleCount[i]]
                                         randomAngleCount[i] = randomAngleCount[i] + 1
 
-                                        # runTime[i]['randomWalkAngle'] = randint(0,360)
+                                        # runTime[i]['randomWalkAngle'] = random.randint(0,360)
                                         # print(runTime[i]['randomWalkAngle'])
 
                                     #coordinates the jitter for all motion clouds:
@@ -2962,8 +3064,7 @@ class App(QMainWindow):
                                 # Update position for moving stimuli
                                 if stim[i]['motionType'] == 'Drift':
                                     if stim[i]['objectType'] == 'Grating':
-                                        runTime[i]['stimulus'].phase = runTime[i]['phase'] + runTime[i][
-                                            'driftIncrement'] * runTime[i]['stimFrame']
+                                        runTime[i]['stimulus'].phase += stim[i]['driftFreq'] * dt
                                     elif stim[i]['objectType'] == 'Windmill':
                                         if stim[i]['turnDirection'] == 'Clockwise':
                                             runTime[i]['stimulus'].setOri(
@@ -2978,18 +3079,18 @@ class App(QMainWindow):
                                             if stim[i]['objectType'] != 'Random Dot':
                                                 x = runTime[i]['startX'] + ppm * stim[i]['speed'] * (
                                                             runTime[i]['stimFrame'] * ifi) * np.cos(
-                                                    stim[i]['angle'] * np.pi / 180)
+                                                    (stim[i]['angle'] - 90) * np.pi / 180)
                                                 y = runTime[i]['startY'] + ppm * stim[i]['speed'] * (
                                                             runTime[i]['stimFrame'] * ifi) * np.sin(
-                                                    stim[i]['angle'] * np.pi / 180)
+                                                    (stim[i]['angle'] - 90) * np.pi / 180)
                                                 runTime[i]['stimulus'].setPos((x, y))
                                         else:
                                             runTime[i]['stimulus'].pos = self.getTrajectoryPosition(i, ifi, ppm)
 
                             elif stim[i]['objectType'] == 'Snake':
                                 if stim[i]['trajectory'] == 'None':
-                                    xdist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.cos(stim[i]['angle'] * np.pi/180)
-                                    ydist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.sin(stim[i]['angle'] * np.pi/180)
+                                    xdist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.cos((stim[i]['angle'] - 90) * np.pi/180)
+                                    ydist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.sin((stim[i]['angle'] - 90) * np.pi/180)
 
                                     x = runTime[i]['startX'] + xdist/2.
                                     y = runTime[i]['startY'] + ydist/2.
@@ -3009,10 +3110,10 @@ class App(QMainWindow):
 
                                     snakeStim[i]['segments'][currentSegment].pos = self.getTrajectoryPosition(i,ifi,ppm)
                                     snakeStim[i]['segments'][currentSegment].width = (stim[i]['width'] + stim[i]['speed'] * ((runTime[i]['stimFrame'] - snakeStim[i]['startFrame'][currentSegment]) * ifi)) * ppm
-                                    # runTime[i]['stimulus'].pos = (x,y)
+                                    runTime[i]['stimulus'].pos = (x,y)
 
 
-                                    #runTime[i]['stimulus'].pos = self.getTrajectoryPosition(i,ifi,ppm)
+                                    runTime[i]['stimulus'].pos = self.getTrajectoryPosition(i,ifi,ppm)
 
 
                             #ALL OTHER STIMULI
@@ -3020,7 +3121,17 @@ class App(QMainWindow):
                                 #Update position for moving stimuli
                                 if stim[i]['motionType'] == 'Drift':
                                     if stim[i]['objectType'] == 'Grating':
-                                        runTime[i]['stimulus'].phase = runTime[i]['phase'] + runTime[i]['driftIncrement'] * runTime[i]['stimFrame']
+                                        if stim[i]['objectAperture'] > 0:
+                                            gratingAperture = visual.Aperture(
+                                                win=win,
+                                                units='pix',
+                                                shape='circle',
+                                                size=stim[i]['objectAperture'] * ppm,
+                                                inverted=False,
+                                                pos=((xOffset + xPos) * ppm, (yOffset + yPos) * ppm)
+                                            )
+                                            gratingAperture.enabled = True
+                                        runTime[i]['stimulus'].phase += stim[i]['driftFreq'] * dt
                                     elif stim[i]['objectType'] == 'Windmill':
                                         if stim[i]['turnDirection'] == 'Clockwise':
                                             runTime[i]['stimulus'].setOri(stim[i]['orientation'] + runTime[i]['driftIncrement'] * runTime[i]['stimFrame'])
@@ -3029,8 +3140,8 @@ class App(QMainWindow):
                                     else:
                                         if stim[i]['trajectory'] == 'None':
                                             if stim[i]['objectType'] != 'Random Dot':
-                                                x = runTime[i]['startX'] + ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.cos(stim[i]['angle'] * np.pi/180)
-                                                y = runTime[i]['startY'] + ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.sin(stim[i]['angle'] * np.pi/180)
+                                                x = runTime[i]['startX'] + ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.cos((stim[i]['angle'] - 90) * np.pi/180)
+                                                y = runTime[i]['startY'] + ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.sin((stim[i]['angle'] - 90) * np.pi/180)
                                                 runTime[i]['stimulus'].setPos((x,y))
                                         else:
                                             runTime[i]['stimulus'].pos = self.getTrajectoryPosition(i,ifi,ppm)
@@ -3051,7 +3162,7 @@ class App(QMainWindow):
                                             runTime[i]['randomWalkFrameCount'] = 0
 
                                             #random angle between 0 and 360 degrees
-                                            # runTime[i]['randomWalkAngle'] = randint(0,360)
+                                            # runTime[i]['randomWalkAngle'] = random.randint(0,360)
                                             runTime[i]['randomWalkAngle'] = randomAngles[i]['angles'][randomAngleCount[i]]
                                             randomAngleCount[i] = randomAngleCount[i] + 1
 
@@ -3059,7 +3170,7 @@ class App(QMainWindow):
                                             #this will happen on first cycle before an update, start the motion in the original direction
                                             if runTime[i]['randomWalkAngle'] == 0:
                                                 runTime[i]['randomWalkAngle'] = 1
-                                            runTime[i]['stimulus'].phase += runTime[i]['phase'] + runTime[i]['randomWalkAngle'] * runTime[i]['driftIncrement']
+                                            runTime[i]['stimulus'].phase += stim[i]['driftFreq'] * dt
                                         else:
                                             #increments the position of the stimulus according to the new angle
                                             x = ppm * stim[i]['speed'] * ifi * np.cos(runTime[i]['randomWalkAngle'] * np.pi/180)
@@ -3124,7 +3235,16 @@ class App(QMainWindow):
                                         elif firstIntensity - bgnd < -1:
                                             firstIntensity = bgnd - 1
 
-                                        runTime[i]['stimulus'].contrast = (stim[i]['contrast']/100.0) * np.sin(2 * np.pi * stim[i]['modulationFreq'] * (runTime[i]['stimFrame'] * ifi))
+                                        sinVal = np.sin(
+                                            2.0 * np.pi * stim[i]['modulationFreq'] * (runTime[i]['stimFrame'] * ifi))
+
+                                        # Map sinVal in [-1..+1] to [secondIntensity..firstIntensity]:
+                                        #
+                                        #   If sinVal = -1 --> contrast = secondIntensity
+                                        #   If sinVal = +1 --> contrast = firstIntensity
+
+                                        runTime[i]['stimulus'].contrast = secondIntensity + 0.5 * (
+                                                    firstIntensity - secondIntensity) * (1.0 + sinVal)
 
                                 elif stim[i]['modulationType'] == 'Chirp':
                                     if stim[i]['objectType'] == 'Grating':
@@ -3133,7 +3253,40 @@ class App(QMainWindow):
                                         runTime[i]['stimulus'].tex = gratingArray
                                     else:
                                         runTime[i]['stimulus'].contrast = chirpWave[runTime[i]['stimFrame']]
-                            #
+                                elif stim[i]['modulationType'] == 'Ramp':
+                                    # Compute background, MaxValue and intensities as before:
+                                    bgnd = self.getBackground()
+                                    MaxValue = 2 ** BitDepth - 1
+
+                                    def compute_intensity(contrast_val, contrastType, bgnd, MaxValue):
+                                        if contrastType == 'Michelson':
+                                            intensity = bgnd + bgnd * (contrast_val / 100.0)
+                                        elif contrastType == 'Weber':
+                                            intensity = bgnd * (contrast_val / 100.0) + bgnd
+                                        elif contrastType == 'Intensity':
+                                            intensity = contrast_val
+                                        else:
+                                            intensity = contrast_val
+                                        intensity = max(0, min(intensity, MaxValue))
+                                        intensity = gammaTable[int(intensity)]
+                                        intensity = (2 * intensity / float(MaxValue)) - 1
+                                        return intensity
+
+                                    init_intensity = compute_intensity(stim[i]['contrast_1'],
+                                                                       stim[i]['contrastType'], bgnd, MaxValue)
+                                    final_intensity = compute_intensity(stim[i]['contrast'],
+                                                                        stim[i]['contrastType'], bgnd, MaxValue)
+
+                                    # compute the ramp
+                                    t = runTime[i]['stimFrame'] #  - runTime[i]['delayFrames']
+                                    fraction = float(t) / float(runTime[i]['frames']) if runTime[i][
+                                                                                             'frames'] > 0 else 1
+                                    ramp_value = init_intensity + fraction * (final_intensity - init_intensity)
+                                    if stim[i]['objectType'] == 'Grating':
+                                        runTime[i]['stimulus'].tex = self.CalculateGrating(i, 1, ramp_value)
+                                    else:
+                                        runTime[i]['stimulus'].contrast = ramp_value
+
                             # testTimer = 0
                             # testTimer = core.Clock()
 
@@ -3187,8 +3340,8 @@ class App(QMainWindow):
                                         xPos = stim[i]['xPos']
                                         yPos = stim[i]['yPos']
                                     elif stim[i]['coordinateType'] == 'Polar':
-                                        xPos = stim[i]['polarRadius'] * np.cos(stim[i]['polarAngle'] * np.pi/180.)
-                                        yPos = stim[i]['polarRadius'] * np.sin(stim[i]['polarAngle'] * np.pi/180.)
+                                        xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi/180.)
+                                        yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi/180.)
 
                                     if stim[i]['objectAperture'] > 0:
 
@@ -3247,7 +3400,11 @@ class App(QMainWindow):
                                     else:
                                         cloudAperture.enabled = False
 
-                                runTime[i]['stimulus'].draw() #draws every frame
+                                # runTime[i]['stimulus'].draw() #draws every frame
+                                # if there’s a trajectory, move it (this now catches Gratings too)
+                                if stim[i]['trajectory'] != 'None':
+                                    runTime[i]['stimulus'].pos = self.getTrajectoryPosition(i, ifi, ppm)
+                                runTime[i]['stimulus'].draw()  # draws every frame (TODO: time this!)
 
 
                                 #check aperture for each grating object, disables it after it was drawn as a reset for the next possible object
@@ -3269,10 +3426,21 @@ class App(QMainWindow):
                             #     mask[i].draw()
 
                             #increase stimFrame count if the code has reached here
-                            runTime[i]['stimFrame'] = runTime[i]['stimFrame'] + 1
+                            # runTime[i]['stimFrame'] = runTime[i]['stimFrame'] + 1
+                            elapsed = sweepClock.getTime()  # seconds since sweep start
+                            if elapsed >= stim[i]['delay'] and elapsed <= stim[i]['delay'] + stim[i]['duration']:
+                                runTime[i]['stimFrame'] = int((elapsed - stim[i]['delay']) / ifi)  # <-- NEW
 
                         #Flip the window every loop no matter what
+                        # If the video card happens to deliver more frames than the nominal
+                        # totalDuration (unlikely, but possible),
+                        # extend the time-stamp array on the fly
+                        if frame >= frameTimeStamps.shape[0]:
+                            frameTimeStamps = np.resize(frameTimeStamps,
+                                                        (frame + 1, numSweeps * repeats))
+                        run_time += sweepClock.getTime() - now
                         frameTimeStamps[frame][sweep + numSweeps*repeat] = win.flip()
+                        frame += 1
 
                         if objectON == 1:
                             # t = (time() * 1000)
@@ -3288,8 +3456,9 @@ class App(QMainWindow):
                         if exportStimulus == 1:
                             self.exportStimulusFrames(originalStimName,frame)
 
-                        frameCount = frameCount + 1
 
+                        frameCount = frameCount + 1
+                    print("run_time:", run_time)
                     #Normalize first frame of the stimulus onset to zero seconds
                     whichCol = sweep + numSweeps*repeat
 
@@ -3310,74 +3479,101 @@ class App(QMainWindow):
                     self.stimCountDown.setText('')
                     # self.sweepMonitor.setText('')
 
-                    #Wait for trial time to expire before starting next sweep
-                    while totalTimer.getTime() < trialTime:
-                        #show a seconds timer for when the trial will actually reset
-                        # self.stimCountDown.setText("%.0f" % (totalTimer.getTime()))
-
-                        #flip the sync spot at the end of the sweep
-                        self.drawSyncSpot(syncSpot,-1)
-                        win.flip()
+                    # #Wait for trial time to expire before starting next sweep
+                    # totalTimer.reset()
+                    # while totalTimer.getTime() < trialTime:
+                    #     # Keep showing how much time has elapsed:
+                    #     self.stimCountDown.setText("%.2f" % (totalTimer.getTime()))
+                    #     self.sweepMonitor.setText(str(sweep + 1) + '/' + str(numSweeps))
+                    #
+                    #     # Draw or flip as needed
+                    #     self.drawSyncSpot(syncSpot, -1)
+                    #     win.flip()
+                    #
+                    #     # If you have an abort condition, handle it:
+                    #     if abortStatus:
+                    #         # e.g., clear the timer text here if desired
+                    #         self.stimCountDown.setText('')
+                    #         self.sweepMonitor.setText('')
+                    #         return
+                    #
+                    # self.stimCountDown.setText('')
+                    # self.sweepMonitor.setText('')
 
                 #Flip the window to background again
                 self.drawSyncSpot(syncSpot,-1)
                 win.flip()
 
-    def CalculateGrating(self,i,polarity,contrast):
-        # bgnd255 = int(self.background.text())
-        # bgnd255 =  (2 * bgnd255/255.) - 1
+    def CalculateGrating(self, i, polarity, contrastScale):
+        """
+        i             : index of the stim object
+        polarity      : typically +1 or -1 (if you want to invert the wave)
+        contrastScale : numeric amplitude you might pass in from your 'modulationType'
 
-        type = self.getGratingType(i)
+        Returns
+        -------
+        gratingArray : 2D numpy array in [-1..+1] for use as the stimulus texture.
 
-        MaxValue = 2**BitDepth - 1
+        Behavior
+        --------
+        - 'Square' => wave toggles between background and object’s max.
+        - 'Sine'   => wave smoothly oscillates between background and object’s max.
+        """
+        t0 = time.time()
+        # For example, get whether 'Sine' or 'Square' from object dictionary
+        gratingKind = self.getGratingType(i)  # returns 'sin', 'sqr', or 'sin' again for 'Plaid'
 
-        bgnd4095 = int(self.background.text())
+        # Grab the two intensities your code usually precomputes.
+        # Typically, these are in [-1..+1], e.g.:
+        firstIntensity = runTime[i]['firstIntensity']  # e.g., “max contrast” in [-1..+1]
+        secondIntensity = runTime[i]['secondIntensity']  # e.g., background or some other intensity
+        # However, if your code does not store them in runTime[i], you can directly
+        # compute them here from stim[i]['contrast'] and self.background, etc.
 
-        if bgnd4095 == 0:
-            bgnd4095 = 2047
+        # By your typical usage, 'background' is something like secondIntensity
+        # and 'firstIntensity' is the object’s bright level.
+        bgnd = secondIntensity
+        maxC = firstIntensity  # so we want wave to go from bgnd up to maxC
 
-        bgnd4095 =  (2 * bgnd4095/float(MaxValue)) - 1
+        gratingSize = win.size[0]  # how wide the texture is
+        rowArray = np.arange(int(gratingSize))
+        # Basic sine in [-1..+1]:
+        sinVals = np.sin(2 * np.pi * rowArray / gratingSize)
+        # Possibly multiply by 'polarity' or 'contrastScale'
+        # if you want a bigger amplitude or an inversion:
+        sinVals *= polarity * contrastScale
 
-        gratingSize = win.size[0]
+        if gratingKind == 'sqr':
+            # Square wave between BG and Max:
+            # If sin > 0 => maxC; else => bgnd.
+            indexArray = np.where(
+                sinVals > 0,
+                maxC,
+                bgnd
+            )
+        else:
+            # Sine wave from BG to Max:
+            # wave(x) = BG + (Max - BG)*[ (1 + sinVals) / 2 ]
+            indexArray = bgnd + (maxC - bgnd) *  (sinVals)
+            # indexArray = bgnd + (maxC - bgnd)* (1.0 + sinVals)
 
-        rowArray = np.zeros([int(gratingSize)],dtype=float)
-        rowArray[:] = np.arange(int(gratingSize))
+        # -----------------------------------------------------------------------
+        # OPTIONAL: re-apply your gammaTable to keep the 12-bit pipeline consistent
+        # Just as a reminder, you typically do something like:
+        #   1) map [-1..+1] -> [0..MaxValue]
+        #   2) index into gammaTable
+        #   3) map back to [-1..+1]
+        # This snippet is the same style you had before:
+        # -----------------------------------------------------------------------
+        MaxValue = 2 ** BitDepth - 1
+        arr_01 = 0.5 * (indexArray + 1.0)  # map [-1..+1] to [0..1]
+        arr_in_bitrange = np.clip(arr_01 * MaxValue, 0, MaxValue).astype(int)
+        arr_gamma_corrected = gammaTable[arr_in_bitrange]  # e.g. gammaTable[...] in [0..4095]
+        finalArray = 2.0 * (arr_gamma_corrected / float(MaxValue)) - 1.0  # back to [-1..+1]
 
-        # indexArray = bgnd255 + (polarity * contrast / 100.0) * (-1 - bgnd255) * np.sin(2 * np.pi * 1 * rowArray/(gratingSize))
-        indexArray = bgnd4095 + (polarity * contrast / 100.0) * (-1 - bgnd4095) * np.sin(2 * np.pi * 1 * rowArray/(gratingSize))
-
-        #convert to 0-255 for gamma correction
-        # indexArray255 = 255 * (indexArray + 1.) / 2.
-
-        #convert to 0-4095 for gamma correction
-        indexArray4095 = MaxValue * (indexArray + 1.) / 2.
-
-        if type == 'sqr':
-            maxVal = np.max(indexArray4095)
-            minVal = np.min(indexArray4095)
-            midVal = (maxVal + minVal) / 2.
-
-            indexArray4095 = np.where(indexArray4095 < midVal,minVal,maxVal)
-
-        #Ensure no clipping
-        # indexArray255 = np.where(indexArray255 > 255,255,indexArray255)
-        # indexArray255 = np.where(indexArray255 < 0,0,indexArray255)
-
-        #gamma correct the grating values
-        # with np.nditer(indexArray255,op_flags=['readwrite']) as it:
-        #     for x in it:
-        #         x[...] = gammaTable[int(x)]
-
-        with np.nditer(indexArray4095,op_flags=['readwrite']) as it:
-            for x in it:
-                x[...] = gammaTable[int(x)]
-
-        #convert back to -1 to 1 range
-        # indexArrayGamma = (2 * indexArray255/255.) - 1
-        indexArrayGamma = (2 * indexArray4095/float(MaxValue)) - 1
-
-        gratingArray = np.tile(indexArrayGamma,(int(gratingSize),1))
-
+        # Make it a 2D texture
+        gratingArray = np.tile(finalArray, (int(gratingSize), 1))
+        print(time.time() - t0)
         return gratingArray
 
     #Defines the stimulus textures
@@ -3398,8 +3594,8 @@ class App(QMainWindow):
             xPos = stim[i]['xPos']
             yPos = stim[i]['yPos']
         elif stim[i]['coordinateType'] == 'Polar':
-            xPos = stim[i]['polarRadius'] * np.cos(stim[i]['polarAngle'] * np.pi/180.)
-            yPos = stim[i]['polarRadius'] * np.sin(stim[i]['polarAngle'] * np.pi/180.)
+            xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi/180.)
+            yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi/180.)
 
         # if stim[i]['maskCoordinateType'] == 'Cartesian':
         #     xPosMask = stim[i]['maskXPos']
@@ -3442,87 +3638,38 @@ class App(QMainWindow):
             pos = ((xOffset + xPos) * ppm,(yOffset + yPos) * ppm)
             )
         elif stim[i]['objectType'] == 'Grating':
-            #type of grating
             type = self.getGratingType(i)
 
-
-            #2022 fixes. Generate grating through numpy array, so that it can handle offset
-            #backgrounds that aren't around the middle intensity value.
-
-            # bgnd255 = int(self.background.text())
-            # bgnd255 =  (2 * bgnd255/255.) - 1
-
-            bgnd4095 = int(self.background.text())
-
-            if bgnd4095 == 0:
-                bgnd4095 = 2047
-
-            bgnd4095 = (2 * bgnd4095/float(MaxValue)) - 1
-
+            # Just use the global background
+            bgnd = self.getBackground()
             gratingSize = win.size[0]
 
-            rowArray = np.zeros([int(gratingSize)],dtype=float)
+            rowArray = np.arange(int(gratingSize))
+            sinVals = np.sin(2 * np.pi * rowArray / gratingSize)
 
-            #TESTING
-            rowArray[:] = np.arange(int(gratingSize))
+            # If sin>0: background + contrast, else just background
+            contrast_fraction = stim[i]['contrast'] / 100.0
+            indexArray = np.where(
+                sinVals > 0,
+                bgnd + contrast_fraction * (1 - bgnd),  # bright bars
+                bgnd  # dark bars
+            )
 
-            # indexArray = bgnd255 + (stim[i]['contrast'] / 100.0) * (-1 - bgnd255) * np.sin(2 * np.pi * 1 * rowArray/(gratingSize))
-            indexArray = bgnd4095 + (stim[i]['contrast'] / 100.0) * (-1 - bgnd4095) * np.sin(2 * np.pi * 1 * rowArray/(gratingSize))
-
-            #convert to 0-255 for gamma correction
-            # indexArray255 = 255 * (indexArray + 1.) / 2.
-
-            #convert to 0-4095 for gamma correction
-            indexArray4095 = MaxValue * (indexArray + 1.) / 2.
-
-            if type == 'sqr':
-                maxVal = np.max(indexArray4095)
-                minVal = np.min(indexArray4095)
-                midVal = (maxVal + minVal) / 2.
-
-                indexArray4095 = np.where(indexArray4095 < midVal,minVal,maxVal)
-
-
-            #Ensure no clipping
-            # indexArray255 = np.where(indexArray255 > 255,255,indexArray255)
-            # indexArray255 = np.where(indexArray255 < 0,0,indexArray255)
-
-            #gamma correct the grating values
-            # with np.nditer(indexArray255,op_flags=['readwrite']) as it:
-            #     for x in it:
-            #         x[...] = gammaTable[int(x)]
-
-            # with np.nditer(indexArray4095,op_flags=['readwrite']) as it:
-            #     for x in it:
-            #         x[...] = gammaTable[int(x)]
-
-            #convert back to -1 to 1 range
-            # indexArrayGamma = (2 * indexArray255/255.) - 1
-            indexArrayGamma = (2 * indexArray4095/float(MaxValue)) - 1
-
-            gratingArray = np.tile(indexArrayGamma,(int(gratingSize),1))
-
-            # rowArray = np.zeros([int(gratingSize)],dtype=float)
-            # rowArray[:] = np.arange(int(gratingSize))
-            # indexArray = np.tile(rowArray,(int(gratingSize),1))
-
-            # #calculate the grating as a single cycle
-            # gratingArray = bgnd + (stim[i]['contrast'] / 100.0) * (-1 - bgnd) * np.sin(2 * np.pi * 1 * indexArray/(gratingSize))
-
+            # Create 2D array
+            gratingArray = np.tile(indexArray, (int(gratingSize), 1))
+            # Build the GratingStim using the global background
             stimulus = visual.GratingStim(
-            win = win,
-            units = 'pix',
-            size=[gratingSize,gratingSize],
-            tex = gratingArray,
-            texRes = 1024,
-            #mask = mask,
-            #maskParams = {'fringeWidth':0.2},
-            sf = stim[i]['spatialFreq'] / (ppm * 1000),
-            ori = -stim[i]['orientation'],
-            phase = stim[i]['spatialPhase']/360.0,#phase is fractional from 0 to 1
-            color = [1,1,1],
-            contrast = 1.0,
-            pos = ((xOffset + xPos) * ppm,(yOffset + yPos) * ppm)
+                win=win,
+                units='pix',
+                size=[gratingSize, gratingSize],
+                tex=gratingArray,
+                texRes=1024,
+                sf=stim[i]['spatialFreq'] / (ppm * 1000),
+                ori=stim[i]['orientation'],
+                phase=stim[i]['spatialPhase'] / 360.0,
+                color=[1, 1, 1],
+                contrast=1.0,
+                pos=((xOffset + xPos) * ppm, (yOffset + yPos) * ppm)
             )
 
             #resolve masks
@@ -3556,7 +3703,7 @@ class App(QMainWindow):
                 #mask = mask,
                 #maskParams = {'fringeWidth':0.2},
                 sf = stim[i]['spatialFreq'] / (ppm * 1000),
-                ori = stim[i]['orientation'] + 90,
+                ori = stim[i]['orientation'], # + 90,
                 phase = stim[i]['spatialPhase']/360.0,#phase is fractional from 0 to 1
                 color = [1,1,1],
                 contrast = stim[i]['contrast']/100.0,
@@ -3564,8 +3711,6 @@ class App(QMainWindow):
                 pos = ((xOffset + xPos) * ppm,(yOffset + yPos) * ppm)
                 )
         elif stim[i]['objectType'] == 'Checkerboard':
-            #set the seed for random number generator
-            np.random.seed(stim[i]['noiseSeed'])
 
             # adjustedNoiseSize = round(stim[i]['noiseSize'] * ppm) / ppm
             # self.noiseSize.setText(str(round(adjustedNoiseSize)))
@@ -3582,8 +3727,6 @@ class App(QMainWindow):
             )
 
         elif stim[i]['objectType'] == 'Checkerboard 1D':
-            #set the seed for random number generator
-            np.random.seed(stim[i]['noiseSeed'])
 
             noiseY = int(stim[i]['width'] * ppm)
             noiseX = np.ceil(stim[i]['length'] * ppm)
@@ -3678,7 +3821,7 @@ class App(QMainWindow):
 
             #this is the second most time intensive step - 43%
 
-            cloudArray[i]['MotionCloud'] = mc.random_cloud(envelope,seed=1)
+            cloudArray[i]['MotionCloud'] = mc.random_cloud(envelope,seed=MASTER_SEED)
 
             #print(testTime.getTime())
 
@@ -3798,12 +3941,6 @@ class App(QMainWindow):
                 totalFrames = snakeStim[i]['startFrame'][x]
 
             for x in range(numSegments):
-
-                # xdist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.cos(stim[i]['angle'] * np.pi/180)
-                # ydist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.sin(stim[i]['angle'] * np.pi/180)
-                #
-                # x = runTime[i]['startX'] + xdist/2.
-                # y = runTime[i]['startY'] + ydist/2.
                 angle = trajDict[name]['angle'][x]
                 if angle.isnumeric():
                     orientation = angle
@@ -3867,7 +4004,7 @@ class App(QMainWindow):
             stimulus = visual.FixedDirDotStim(
                 win = win,
                 units = 'pix',
-                seed = 1,
+                seed = MASTER_SEED,
                 nDots = int(stim[i]['numDots']),
                 coherence = float(stim[i]['dotCoherence'] / 100),
                 fieldPos = ((xOffset + xPos) * ppm,(yOffset + yPos) * ppm),
@@ -3883,7 +4020,6 @@ class App(QMainWindow):
                 noiseDots = 'direction'
             )
 
-            np.random.seed(1)
             # stimulus = visual.FixedDirDotStim(
             #     win = win,
             #     units = 'pix',
@@ -3921,7 +4057,7 @@ class App(QMainWindow):
 
     def getAnnulusVertices(self,innerDiameter,outerDiameter):
         vertex = np.zeros((25,2),np.float32)
-        theta = 2.0 * np.pi / 25.0 #delta theta is half because it need 100 vertices for both inner and outer rings
+        theta =  2.0 * np.pi / 25.0 #delta theta is half because it need 100 vertices for both inner and outer rings
 
         i = 0
         for _ in range(25):
@@ -4039,8 +4175,8 @@ class App(QMainWindow):
             xPos = stim[i]['xPos']
             yPos = stim[i]['yPos']
         elif stim[i]['coordinateType'] == 'Polar':
-            xPos = stim[i]['polarRadius'] * np.cos(stim[i]['polarAngle'] * np.pi/180.)
-            yPos = stim[i]['polarRadius'] * np.sin(stim[i]['polarAngle'] * np.pi/180.)
+            xPos = stim[i]['polarRadius'] * np.cos((stim[i]['polarAngle'] - 90) * np.pi/180.)
+            yPos = stim[i]['polarRadius'] * np.sin((stim[i]['polarAngle'] - 90) * np.pi/180.)
 
 
         for segment in range(numSegments):
@@ -4126,7 +4262,7 @@ class App(QMainWindow):
                                 randomWalkFrameCount = 0
 
                                 #random angle between 0 and 360 degrees
-                                randomWalkAngle = randint(0,360)
+                                randomWalkAngle = rng.integers(0, 361)
 
                             #coordinates the jitter for all motion clouds:
                             #sets the walk angle to be the same as that of the first cloud definition
@@ -4227,7 +4363,7 @@ class App(QMainWindow):
                                 randomWalkFrameCount = 0
 
                                 #random angle between 0 and 360 degrees
-                                randomWalkAngle = randint(0,360)
+                                randomWalkAngle = rng.integers(0, 361)
 
                             #coordinates the jitter for all motion clouds:
                             #sets the walk angle to be the same as that of the first cloud definition
@@ -4269,12 +4405,6 @@ class App(QMainWindow):
             else:
                 x = trajectoryStim[i]['xPos'][runTime[i]['stimFrame']]
                 y = trajectoryStim[i]['yPos'][runTime[i]['stimFrame']]
-
-            #xdist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.cos(stim[i]['angle'] * np.pi/180)
-            #ydist = ppm * stim[i]['speed'] * (runTime[i]['stimFrame'] * ifi) * np.sin(stim[i]['angle'] * np.pi/180)
-
-            # x = runTime[i]['startX'] + xdist/2.
-            # y = runTime[i]['startY'] + ydist/2.
         else:
             if runTime[i]['stimFrame'] > len(trajectoryStim[i]['xPos']):
                 x = trajectoryStim[i]['xPos'][len(trajectoryStim[i]['xPos'])-1]
@@ -4568,6 +4698,7 @@ class App(QMainWindow):
         'objectAperture':0,
         'contrastType':'Weber',
         'contrast':0,
+        'contrast_1': 0,  # NEW: initial contrast value
         'modulationType':'Static',
         'modulationFreq':0,
         'motionType':'Static',
@@ -4588,7 +4719,7 @@ class App(QMainWindow):
         'maskPolarAngle':0,
         'noiseType':'Binary',
         'noiseSize':0,
-        'noiseSeed':0,
+        'noiseSeed':MASTER_SEED,
         'numDots':0,
         'dotCoherence':0,
         'signalDirection':0,
@@ -4671,6 +4802,7 @@ class App(QMainWindow):
             'parent':'contrast',
             'sequence':'None'
             },
+        'contrast_1Seq': {'control': self.contrast1Seq, 'parent': 'contrast_1', 'sequence': 'None'},
         'modulationFreqSeq':{
             'control':self.modulationFreqSeq,
             'parent':'modulationFreq',
@@ -4956,6 +5088,7 @@ class App(QMainWindow):
         'contrast':self.contrast,
         'contrastLabel':self.contrastLabel,
         'contrastSeq':self.contrastSeq,
+        'contrast_1Seq': self.contrast1Seq,
         'modulationType':self.modulationType,
         'modulationFreq':self.modulationFreq,
         'modulationFreqLabel':self.modulationFreqLabel,
@@ -4965,6 +5098,7 @@ class App(QMainWindow):
         'speed':self.speed,
         'speedLabel':self.speedLabel,
         'speedSeq':self.speedSeq,
+        'contrast_1Seq': self.contrast1Seq,
         'driftFreqLabel':self.driftFreqLabel,
         'driftFreq':self.driftFreq,
         'driftFreqSeq':self.driftFreqSeq,
@@ -5571,11 +5705,11 @@ class App(QMainWindow):
         self.designPanelLayout.addWidget(self.objectType,6,0,1,2)
 
         #Add blank slot to the right of the object type menu
-        self.designPanelLayout.addWidget(self.blank2,7,3)
+        # self.designPanelLayout.addWidget(self.blank2,7,3)
         #self.blank2.setStyleSheet("QLabel {background-color: blue;}")
-        self.blank2.setFixedHeight(20 * scale_h)
+        # self.blank2.setFixedHeight(20 * scale_h)
         #self.blank2.setFixedWidth(20 * scale_h)
-        self.blank2.setAlignment(QtCore.Qt.AlignVCenter)
+        # self.blank2.setAlignment(QtCore.Qt.AlignVCenter)
 
         #Coordinates
         self.coordinateLabel = QLabel('Coordinates')
@@ -5751,10 +5885,10 @@ class App(QMainWindow):
         self.noiseType.activated.connect(lambda: self.menuProc('noiseType',self.noiseType.currentText()))
 
         #insert blank after the spatial frequency row
-        self.blank4.setFixedHeight(20 * scale_h)
+        # self.blank4.setFixedHeight(20 * scale_h)
         self.designPanelLayout.addWidget(self.blank4,11,0,1,10)
         #self.blank4.setStyleSheet("QLabel {background-color: black;}")
-        self.blank4.setAlignment(QtCore.Qt.AlignVCenter)
+        # self.blank4.setAlignment(QtCore.Qt.AlignVCenter)
 
         #Noise Seed
         self.noiseSeedLabel = QLabel('Seed',self)
@@ -6121,10 +6255,10 @@ class App(QMainWindow):
         self.designPanelLayout.addWidget(self.contrastSeq,7,6)
 
         #Add blank slot to the right of the contrast edit box
-        self.designPanelLayout.addWidget(self.blank3,7,7)
-        #self.blank3.setStyleSheet("QLabel {background-color: blue;}")
-        self.blank3.setFixedHeight(20 * scale_h)
-        self.blank3.setAlignment(QtCore.Qt.AlignVCenter)
+        # self.designPanelLayout.addWidget(self.blank3,7,7)
+        # #self.blank3.setStyleSheet("QLabel {background-color: blue;}")
+        # self.blank3.setFixedHeight(20 * scale_h)
+        # self.blank3.setAlignment(QtCore.Qt.AlignVCenter)
 
         #Modulation
         self.modulationTypeLabel = QLabel('Modulation',self)
@@ -6133,7 +6267,18 @@ class App(QMainWindow):
         self.modulationType = QComboBox(self)
         self.modulationType.activated.connect(lambda: self.menuProc('modulationType',self.modulationType.currentText()))
         self.modulationType.setFixedHeight(20 * scale_h)
-        self.modulationType.addItems(['Static','Square','Sine','Chirp','Noise'])
+        self.modulationType.addItems(['Static','Square','Sine','Chirp','Noise','Ramp'])
+        self.designPanelLayout.addWidget(self.modulationTypeLabel, 8, 4, 1, 2)
+        self.designPanelLayout.addWidget(self.modulationType, 8, 5, 1, 2)
+
+        # contrast_1 controls below the modulation controls:
+        self.contrast1Label = QLabel('ContStart', self)
+        self.contrast1 = QLineEdit(self)
+        self.contrast1Seq = QComboBox(self)
+        self.contrast1Seq.addItem('None')
+        self.designPanelLayout.addWidget(self.contrast1Label, 11, 4)
+        self.designPanelLayout.addWidget(self.contrast1, 11, 5)
+        self.designPanelLayout.addWidget(self.contrast1Seq, 11, 6)
 
         self.modulationFreqLabel = QLabel('Freq.',self)
         self.modulationFreq =  QLineEdit(self)
@@ -6151,6 +6296,15 @@ class App(QMainWindow):
         self.designPanelLayout.addWidget(self.modulationFreqLabel,10,4)
         self.designPanelLayout.addWidget(self.modulationFreq,10,5)
         self.designPanelLayout.addWidget(self.modulationFreqSeq,10,6)
+
+        # # Create new widgets for "Contrast Start"
+        # self.contrast1Label = QLabel('ContStart', self)
+        # self.contrast1 = QLineEdit(self)
+        # self.contrast1Seq = QComboBox(self)
+        # self.contrast1Seq.addItem('None')
+        # # When the user edits the contrast1 field, update the stimulus dictionary.
+        # self.contrast1.editingFinished.connect(lambda: self.variableProc('contrast_1', self.contrast1.text()))
+        # self.contrast1Seq.activated.connect(lambda: self.menuProc('contrast_1Seq', self.contrast1Seq.currentText()))
 
         #Motion Type
         self.motionTypeLabel = QLabel('Motion',self)
@@ -6255,10 +6409,10 @@ class App(QMainWindow):
 
 
         #blank after angle row so hiding modFrequency doesn't change grid
-        self.blank5.setFixedHeight(20 * scale_h)
-        self.designPanelLayout.addWidget(self.blank5,10,8,1,1)
-        #self.blank5.setStyleSheet("QLabel {background-color: green;}")
-        self.blank5.setAlignment(QtCore.Qt.AlignVCenter)
+        # self.blank5.setFixedHeight(20 * scale_h)
+        # self.designPanelLayout.addWidget(self.blank5,10,8,1,1)
+        # #self.blank5.setStyleSheet("QLabel {background-color: green;}")
+        # self.blank5.setAlignment(QtCore.Qt.AlignVCenter)
 
 
 
@@ -6564,7 +6718,7 @@ class App(QMainWindow):
     def buildSequencePanel(self):
         left = 165 * scale_w
         top = 315 * scale_h
-        width = 475 * scale_w
+        width = 600 * scale_w
         height = 400 * scale_h
 
         if system == 'Windows' or system == 'Linux':
@@ -6595,6 +6749,14 @@ class App(QMainWindow):
         seqPanelLayout.addWidget(self.removeSeq,2,0,2,2)
         self.removeSeq.clicked.connect(lambda: self.buttonProc("removeSeq"))
 
+        self.shuffleSeqButton = QPushButton("Shuffle\nSequences")
+        seqPanelLayout.addWidget(self.shuffleSeqButton, 0, 6, 2, 2)  # Adjust layout as needed
+        self.shuffleSeqButton.clicked.connect(self.shuffleAllSequences)
+
+        self.cycleSeqButton = QPushButton("Cycle\nSequences")
+        seqPanelLayout.addWidget(self.cycleSeqButton, 2, 6, 2, 2)  # Adjust layout as needed
+        self.cycleSeqButton.clicked.connect(self.cycleAllSequences)
+
         #Sequence list box
         self.seqListBox = QListWidget()
         seqPanelLayout.addWidget(self.seqListBox,0,2,4,4)
@@ -6602,12 +6764,12 @@ class App(QMainWindow):
 
         #Sequence entry
         self.seqEntry = QLineEdit()
-        seqPanelLayout.addWidget(self.seqEntry,4,0,1,6)
+        seqPanelLayout.addWidget(self.seqEntry,4,0,2,16)
         self.seqEntry.editingFinished.connect(lambda: self.variableProc('seqEntry',self.seqEntry.text()))
 
         #Spacer
-        self.blank1 = QLabel('')
-        seqPanelLayout.addWidget(self.blank1,5,0)
+        # self.blank1 = QLabel('')
+        # seqPanelLayout.addWidget(self.blank1,5,0)
 
         #Trajectory list box label
         self.trajListBoxLabel = QLabel('Trajectories')
@@ -7882,6 +8044,30 @@ if __name__ == '__main__':
 
     #styles
     StimGen.setStyle('Fusion')
+
+    # Create a style sheet for dark theme
+    dark_stylesheet = """
+        QMainWindow, QWidget {
+            background-color: #2D2D30;
+            color: #FFFFFF;
+        }
+        QLineEdit, QListWidget, QComboBox, QTextEdit, QSpinBox, QDoubleSpinBox {
+            background-color: #3C3C3C;
+            color: #FFFFFF;
+            border: 1px solid #5A5A5A;
+        }
+        QPushButton {
+            background-color: #3D3D3D;
+            color: #FFFFFF;
+            border: 1px solid #4E4E4E;
+            padding: 5px;
+        }
+        QPushButton:hover {
+            background-color: #505050;
+        }
+        """
+
+    StimGen.setStyleSheet(dark_stylesheet)
 
     system = platform.system()
     if system == 'Windows' or system == 'Linux':
