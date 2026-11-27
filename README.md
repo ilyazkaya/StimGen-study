@@ -16,11 +16,9 @@ python StimGen-ilya2.1.py
 
 Select the display and adjust the pixels per micrometre, background, offsets, and gamma for your setup. StimGen measures the display refresh rate at initialization. The parallel-port address is `0x4FF8`. For Windows, use the [PsychoPy parallel-port setup guide](https://psychopy.org/hardware/parallelPortInstr.html). Set **Save to Path** to an existing writable log directory. Run and export save over the selected preset. Use a working copy to preserve the archived settings.
 
-The archived launcher retains an error in `CalculateGrating()` when the grating texture-update routine calls `time.time()` on the imported `time` function.
-
 ## Stimulus presets
 
-**User → Paper 1** contains 17 study presets and `PPMCallibration.stim`. Eleven study presets come from matched recording snapshots and five from the study bank. The supplemental `NullGratFlash3.stim` is a separately preserved named preset. Historical settings for named presets may differ from those used for individual recordings.
+**User → NaV Bifid Stim** contains 17 study presets and `PPMCallibration.stim`. Eleven study presets come from matched recording snapshots and five from the study bank. The supplemental `NullGratFlash3.stim` is a separately preserved named preset. Historical settings for named presets may differ from those used for individual recordings.
 
 ## Cite
 
